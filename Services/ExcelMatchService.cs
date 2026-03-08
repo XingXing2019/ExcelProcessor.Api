@@ -25,7 +25,8 @@ public sealed class ExcelMatchService : IExcelMatchService
     private static readonly HashSet<string> DateColumnKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         CanonicalizeHeader("Document Date:"),
-        CanonicalizeHeader("Posting Date:")
+        CanonicalizeHeader("Posting Date:"),
+        CanonicalizeHeader("Due Date:")
     };
 
     private static readonly string[] SourceOutputHeaders =
@@ -445,7 +446,7 @@ public sealed class ExcelMatchService : IExcelMatchService
                 SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 14), row.Source.TaxGroup);
                 SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 15), row.Source.ExchangeRate);
                 SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 16), row.Source.Terms);
-                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 17), row.Source.DueDate);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 17), row.Source.DueDate, "Due Date:");
                 SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 18), row.Source.GLAccount);
                 SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 19), row.Source.AccountDescription);
                 SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 20), row.Source.DetailDescTaxAuth);
@@ -716,7 +717,7 @@ public sealed class ExcelMatchService : IExcelMatchService
                 continue;
             }
 
-            sheet.Range(2, i + 1, lastRow, i + 1).Style.NumberFormat.Format = "yyyy-mm-dd";
+            sheet.Range(2, i + 1, lastRow, i + 1).Style.NumberFormat.Format = "dd/MM/yyyy";
         }
     }
 
