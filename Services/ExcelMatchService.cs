@@ -8,6 +8,10 @@ namespace ExcelProcessor.Api.Services;
 
 public sealed class ExcelMatchService : IExcelMatchService
 {
+    private const int GLAccountCountColumnIndex = 1; // Column B (0-based)
+    private const int GLCodeColumnIndex = 17; // Column R (0-based)
+    private const string GLCodeHeader = "GL code";
+
     private static readonly HashSet<string> CurrencyColumnKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         CanonicalizeHeader("Total Invoice Amount Vendor Currency"),
@@ -147,18 +151,27 @@ public sealed class ExcelMatchService : IExcelMatchService
                 .Select(r => Normalize(r.GLAccount))
                 .Where(v => !string.IsNullOrEmpty(v) && !string.Equals(v, "540000", StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Count();
+                .ToList();
+            var distinctGlAccountCountText = distinctGlAccountCount.Count.ToString(CultureInfo.InvariantCulture);
+            var glCode = distinctGlAccountCount.Count == 1 ? distinctGlAccountCount[0] : string.Empty;
 
             csvRows.Add(new CsvRow(
                 targetRecord.RowNumber,
                 targetRecord.TargetValues,
                 null,
-                distinctGlAccountCount.ToString(CultureInfo.InvariantCulture)
+                distinctGlAccountCountText,
+                glCode
             ));
 
             foreach (var sourceRecord in matchedSourceRows)
             {
-                csvRows.Add(new CsvRow(targetRecord.RowNumber, targetRecord.TargetValues, sourceRecord, distinctGlAccountCount.ToString(CultureInfo.InvariantCulture)));
+                csvRows.Add(new CsvRow(
+                    targetRecord.RowNumber,
+                    targetRecord.TargetValues,
+                    sourceRecord,
+                    distinctGlAccountCountText,
+                    string.Empty
+                ));
             }
         }
 
@@ -319,29 +332,17 @@ public sealed class ExcelMatchService : IExcelMatchService
     private static string BuildCsv(IEnumerable<CsvRow> rows, IReadOnlyList<string> targetHeaders)
     {
         var sb = new StringBuilder();
-        var csvTargetHeaders = targetHeaders.ToArray();
-        if (csvTargetHeaders.Length > 1)
-        {
-            csvTargetHeaders[1] = "GL/Account Count";
-        }
+        var glCodeInsertIndex = Math.Min(GLCodeColumnIndex, targetHeaders.Count);
+        var csvTargetHeaders = BuildOutputTargetHeaders(targetHeaders, glCodeInsertIndex);
 
         var fullHeaders = csvTargetHeaders.Concat(SourceOutputHeaders);
         sb.AppendLine(string.Join(",", fullHeaders.Select(EscapeCsv)));
 
         foreach (var row in rows)
         {
-            var fields = new List<string>(targetHeaders.Count + SourceOutputHeaders.Length);
-            for (var i = 0; i < row.TargetValues.Length; i += 1)
-            {
-                if (i == 1)
-                {
-                    fields.Add(row.GLAccountGroup);
-                }
-                else
-                {
-                    fields.Add(EscapeCsv(row.TargetValues[i]));
-                }
-            }
+            var outputTargetValues = BuildOutputTargetValues(row, targetHeaders.Count, glCodeInsertIndex);
+            var fields = new List<string>(csvTargetHeaders.Count + SourceOutputHeaders.Length);
+            fields.AddRange(outputTargetValues.Select(EscapeCsv));
 
             if (row.Source is null)
             {
@@ -387,11 +388,8 @@ public sealed class ExcelMatchService : IExcelMatchService
         var matchedSheet = workbook.Worksheets.Add("Matched Results");
         var unmatchedSheet = workbook.Worksheets.Add("Unmatched Targets");
 
-        var excelTargetHeaders = result.TargetHeaders.ToArray();
-        if (excelTargetHeaders.Length > 1)
-        {
-            excelTargetHeaders[1] = "GL/Account Count";
-        }
+        var glCodeInsertIndex = Math.Min(GLCodeColumnIndex, result.TargetHeaders.Count);
+        var excelTargetHeaders = BuildOutputTargetHeaders(result.TargetHeaders, glCodeInsertIndex);
 
         var fullHeaders = excelTargetHeaders.Concat(SourceOutputHeaders).ToList();
 
@@ -414,19 +412,13 @@ public sealed class ExcelMatchService : IExcelMatchService
             var row = matchedRows[r];
             var rowIndex = r + 2;
 
-            for (var c = 0; c < result.TargetHeaders.Count; c += 1)
+            var outputTargetValues = BuildOutputTargetValues(row, result.TargetHeaders.Count, glCodeInsertIndex);
+            for (var c = 0; c < excelTargetHeaders.Count; c += 1)
             {
-                if (c == 1)
-                {
-                    SetCellValue(matchedSheet.Cell(rowIndex, c + 1), row.GLAccountGroup);
-                }
-                else
-                {
-                    SetCellValue(matchedSheet.Cell(rowIndex, c + 1), row.TargetValues[c], excelTargetHeaders[c]);
-                }
+                SetCellValue(matchedSheet.Cell(rowIndex, c + 1), outputTargetValues[c], excelTargetHeaders[c]);
             }
 
-            var sourceStart = result.TargetHeaders.Count + 1;
+            var sourceStart = excelTargetHeaders.Count + 1;
             if (row.Source is not null)
             {
                 matchedSheet.Cell(rowIndex, sourceStart).Value = row.Source.RowNumber;
@@ -456,7 +448,7 @@ public sealed class ExcelMatchService : IExcelMatchService
             }
         }
 
-        for (var i = 0; i < excelTargetHeaders.Length; i += 1)
+        for (var i = 0; i < excelTargetHeaders.Count; i += 1)
         {
             unmatchedSheet.Cell(1, i + 1).Value = excelTargetHeaders[i];
             unmatchedSheet.Cell(1, i + 1).Style.Font.Bold = true;
@@ -466,23 +458,31 @@ public sealed class ExcelMatchService : IExcelMatchService
         {
             var values = result.UnmatchedTargetValues[r];
             var rowIndex = r + 2;
-            for (var c = 0; c < result.TargetHeaders.Count; c += 1)
+            for (var c = 0; c < excelTargetHeaders.Count; c += 1)
             {
-                if (c == 1)
+                if (c == glCodeInsertIndex)
                 {
                     unmatchedSheet.Cell(rowIndex, c + 1).Value = string.Empty;
                 }
                 else
                 {
-                    SetCellValue(unmatchedSheet.Cell(rowIndex, c + 1), values[c], excelTargetHeaders[c]);
+                    var originalIndex = c > glCodeInsertIndex ? c - 1 : c;
+                    if (originalIndex == GLAccountCountColumnIndex)
+                    {
+                        unmatchedSheet.Cell(rowIndex, c + 1).Value = string.Empty;
+                    }
+                    else
+                    {
+                        SetCellValue(unmatchedSheet.Cell(rowIndex, c + 1), values[originalIndex], excelTargetHeaders[c]);
+                    }
                 }
             }
         }
 
         ApplyCurrencyFormat(matchedSheet, fullHeaders, matchedRows.Count + 1);
-        ApplyCurrencyFormat(unmatchedSheet, result.TargetHeaders, result.UnmatchedTargetValues.Count + 1);
+        ApplyCurrencyFormat(unmatchedSheet, excelTargetHeaders, result.UnmatchedTargetValues.Count + 1);
         ApplyDateFormat(matchedSheet, fullHeaders, matchedRows.Count + 1);
-        ApplyDateFormat(unmatchedSheet, result.TargetHeaders, result.UnmatchedTargetValues.Count + 1);
+        ApplyDateFormat(unmatchedSheet, excelTargetHeaders, result.UnmatchedTargetValues.Count + 1);
 
         matchedSheet.Columns().AdjustToContents();
         unmatchedSheet.Columns().AdjustToContents();
@@ -646,6 +646,43 @@ public sealed class ExcelMatchService : IExcelMatchService
         return $"\"{value.Replace("\"", "\"\"")}\"";
     }
 
+    private static List<string> BuildOutputTargetHeaders(IReadOnlyList<string> targetHeaders, int glCodeInsertIndex)
+    {
+        var headers = targetHeaders.ToList();
+        if (headers.Count > GLAccountCountColumnIndex)
+        {
+            headers[GLAccountCountColumnIndex] = "GL/Account Count";
+        }
+
+        headers.Insert(glCodeInsertIndex, GLCodeHeader);
+        return headers;
+    }
+
+    private static List<string> BuildOutputTargetValues(CsvRow row, int targetHeaderCount, int glCodeInsertIndex)
+    {
+        var values = new List<string>(targetHeaderCount + 1);
+        for (var c = 0; c < targetHeaderCount + 1; c += 1)
+        {
+            if (c == glCodeInsertIndex)
+            {
+                values.Add(row.GLCode);
+                continue;
+            }
+
+            var originalIndex = c > glCodeInsertIndex ? c - 1 : c;
+            if (originalIndex == GLAccountCountColumnIndex)
+            {
+                values.Add(row.GLAccountGroup);
+            }
+            else
+            {
+                values.Add(row.TargetValues[originalIndex]);
+            }
+        }
+
+        return values;
+    }
+
     private static void SetCellValue(IXLCell cell, string value, string? header = null)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -800,7 +837,8 @@ public sealed class ExcelMatchService : IExcelMatchService
         int TargetRowNumber,
         string[] TargetValues,
         SourceRecord? Source,
-        string GLAccountGroup
+        string GLAccountGroup,
+        string GLCode
     );
 
     private sealed record MatchComputationResult(
