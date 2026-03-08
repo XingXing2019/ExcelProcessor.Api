@@ -142,11 +142,43 @@ public sealed class ExcelMatchService : IExcelMatchService
                 fullyMatchedRows += 1;
             }
 
-            csvRows.Add(new CsvRow(targetRecord.RowNumber, targetRecord.TargetValues, null));
-
+            var glAccountGroupIndexByAccount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var glAccountGroupNextIndex = 1;
             foreach (var sourceRecord in matchedSourceRows)
             {
-                csvRows.Add(new CsvRow(targetRecord.RowNumber, targetRecord.TargetValues, sourceRecord));
+                var glAccount = Normalize(sourceRecord.GLAccount);
+                if (string.IsNullOrEmpty(glAccount) || string.Equals(glAccount, "540000", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!glAccountGroupIndexByAccount.ContainsKey(glAccount))
+                {
+                    glAccountGroupIndexByAccount[glAccount] = glAccountGroupNextIndex;
+                    glAccountGroupNextIndex += 1;
+                }
+            }
+
+            csvRows.Add(new CsvRow(targetRecord.RowNumber, targetRecord.TargetValues, null, string.Empty));
+
+            var sourceRowsWithGroup = new List<(SourceRecord Source, string Group)>(matchedSourceRows.Count);
+            foreach (var sourceRecord in matchedSourceRows)
+            {
+                var glAccount = Normalize(sourceRecord.GLAccount);
+                var glAccountGroup = string.Empty;
+                if (!string.IsNullOrEmpty(glAccount) &&
+                    !string.Equals(glAccount, "540000", StringComparison.OrdinalIgnoreCase) &&
+                    glAccountGroupIndexByAccount.TryGetValue(glAccount, out var groupIndex))
+                {
+                    glAccountGroup = groupIndex.ToString(CultureInfo.InvariantCulture);
+                }
+
+                sourceRowsWithGroup.Add((sourceRecord, glAccountGroup));
+            }
+
+            foreach (var row in sourceRowsWithGroup.OrderBy(r => string.IsNullOrEmpty(r.Group) ? 0 : int.Parse(r.Group, CultureInfo.InvariantCulture)))
+            {
+                csvRows.Add(new CsvRow(targetRecord.RowNumber, targetRecord.TargetValues, row.Source, row.Group));
             }
         }
 
@@ -307,13 +339,29 @@ public sealed class ExcelMatchService : IExcelMatchService
     private static string BuildCsv(IEnumerable<CsvRow> rows, IReadOnlyList<string> targetHeaders)
     {
         var sb = new StringBuilder();
-        var fullHeaders = targetHeaders.Concat(SourceOutputHeaders);
+        var csvTargetHeaders = targetHeaders.ToArray();
+        if (csvTargetHeaders.Length > 1)
+        {
+            csvTargetHeaders[1] = "GL/Account Count";
+        }
+
+        var fullHeaders = csvTargetHeaders.Concat(SourceOutputHeaders);
         sb.AppendLine(string.Join(",", fullHeaders.Select(EscapeCsv)));
 
         foreach (var row in rows)
         {
             var fields = new List<string>(targetHeaders.Count + SourceOutputHeaders.Length);
-            fields.AddRange(row.TargetValues.Select(EscapeCsv));
+            for (var i = 0; i < row.TargetValues.Length; i += 1)
+            {
+                if (i == 1)
+                {
+                    fields.Add(row.GLAccountGroup);
+                }
+                else
+                {
+                    fields.Add(EscapeCsv(row.TargetValues[i]));
+                }
+            }
 
             if (row.Source is null)
             {
@@ -359,7 +407,13 @@ public sealed class ExcelMatchService : IExcelMatchService
         var matchedSheet = workbook.Worksheets.Add("Matched Results");
         var unmatchedSheet = workbook.Worksheets.Add("Unmatched Targets");
 
-        var fullHeaders = result.TargetHeaders.Concat(SourceOutputHeaders).ToList();
+        var excelTargetHeaders = result.TargetHeaders.ToArray();
+        if (excelTargetHeaders.Length > 1)
+        {
+            excelTargetHeaders[1] = "GL/Account Count";
+        }
+
+        var fullHeaders = excelTargetHeaders.Concat(SourceOutputHeaders).ToList();
 
         for (var i = 0; i < fullHeaders.Count; i += 1)
         {
@@ -382,7 +436,14 @@ public sealed class ExcelMatchService : IExcelMatchService
 
             for (var c = 0; c < result.TargetHeaders.Count; c += 1)
             {
-                SetCellValue(matchedSheet.Cell(rowIndex, c + 1), row.TargetValues[c], result.TargetHeaders[c]);
+                if (c == 1)
+                {
+                    SetCellValue(matchedSheet.Cell(rowIndex, c + 1), row.GLAccountGroup);
+                }
+                else
+                {
+                    SetCellValue(matchedSheet.Cell(rowIndex, c + 1), row.TargetValues[c], excelTargetHeaders[c]);
+                }
             }
 
             var sourceStart = result.TargetHeaders.Count + 1;
@@ -415,9 +476,9 @@ public sealed class ExcelMatchService : IExcelMatchService
             }
         }
 
-        for (var i = 0; i < result.TargetHeaders.Count; i += 1)
+        for (var i = 0; i < excelTargetHeaders.Length; i += 1)
         {
-            unmatchedSheet.Cell(1, i + 1).Value = result.TargetHeaders[i];
+            unmatchedSheet.Cell(1, i + 1).Value = excelTargetHeaders[i];
             unmatchedSheet.Cell(1, i + 1).Style.Font.Bold = true;
         }
 
@@ -427,7 +488,14 @@ public sealed class ExcelMatchService : IExcelMatchService
             var rowIndex = r + 2;
             for (var c = 0; c < result.TargetHeaders.Count; c += 1)
             {
-                SetCellValue(unmatchedSheet.Cell(rowIndex, c + 1), values[c], result.TargetHeaders[c]);
+                if (c == 1)
+                {
+                    unmatchedSheet.Cell(rowIndex, c + 1).Value = string.Empty;
+                }
+                else
+                {
+                    SetCellValue(unmatchedSheet.Cell(rowIndex, c + 1), values[c], excelTargetHeaders[c]);
+                }
             }
         }
 
@@ -751,7 +819,8 @@ public sealed class ExcelMatchService : IExcelMatchService
     private sealed record CsvRow(
         int TargetRowNumber,
         string[] TargetValues,
-        SourceRecord? Source
+        SourceRecord? Source,
+        string GLAccountGroup
     );
 
     private sealed record MatchComputationResult(
