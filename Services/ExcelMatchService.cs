@@ -142,43 +142,22 @@ public sealed class ExcelMatchService : IExcelMatchService
                 fullyMatchedRows += 1;
             }
 
-            var glAccountGroupIndexByAccount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            var glAccountGroupNextIndex = 1;
+            var distinctGlAccountCount = matchedSourceRows
+                .Select(r => Normalize(r.GLAccount))
+                .Where(v => !string.IsNullOrEmpty(v) && !string.Equals(v, "540000", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+
+            csvRows.Add(new CsvRow(
+                targetRecord.RowNumber,
+                targetRecord.TargetValues,
+                null,
+                distinctGlAccountCount.ToString(CultureInfo.InvariantCulture)
+            ));
+
             foreach (var sourceRecord in matchedSourceRows)
             {
-                var glAccount = Normalize(sourceRecord.GLAccount);
-                if (string.IsNullOrEmpty(glAccount) || string.Equals(glAccount, "540000", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (!glAccountGroupIndexByAccount.ContainsKey(glAccount))
-                {
-                    glAccountGroupIndexByAccount[glAccount] = glAccountGroupNextIndex;
-                    glAccountGroupNextIndex += 1;
-                }
-            }
-
-            csvRows.Add(new CsvRow(targetRecord.RowNumber, targetRecord.TargetValues, null, string.Empty));
-
-            var sourceRowsWithGroup = new List<(SourceRecord Source, string Group)>(matchedSourceRows.Count);
-            foreach (var sourceRecord in matchedSourceRows)
-            {
-                var glAccount = Normalize(sourceRecord.GLAccount);
-                var glAccountGroup = string.Empty;
-                if (!string.IsNullOrEmpty(glAccount) &&
-                    !string.Equals(glAccount, "540000", StringComparison.OrdinalIgnoreCase) &&
-                    glAccountGroupIndexByAccount.TryGetValue(glAccount, out var groupIndex))
-                {
-                    glAccountGroup = groupIndex.ToString(CultureInfo.InvariantCulture);
-                }
-
-                sourceRowsWithGroup.Add((sourceRecord, glAccountGroup));
-            }
-
-            foreach (var row in sourceRowsWithGroup.OrderBy(r => string.IsNullOrEmpty(r.Group) ? 0 : int.Parse(r.Group, CultureInfo.InvariantCulture)))
-            {
-                csvRows.Add(new CsvRow(targetRecord.RowNumber, targetRecord.TargetValues, row.Source, row.Group));
+                csvRows.Add(new CsvRow(targetRecord.RowNumber, targetRecord.TargetValues, sourceRecord, string.Empty));
             }
         }
 
