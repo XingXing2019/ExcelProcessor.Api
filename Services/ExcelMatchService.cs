@@ -158,7 +158,7 @@ public sealed class ExcelMatchService : IExcelMatchService
 
             foreach (var sourceRecord in matchedSourceRows)
             {
-                csvRows.Add(new CsvRow(targetRecord.RowNumber, targetRecord.TargetValues, sourceRecord, string.Empty));
+                csvRows.Add(new CsvRow(targetRecord.RowNumber, targetRecord.TargetValues, sourceRecord, distinctGlAccountCount.ToString(CultureInfo.InvariantCulture)));
             }
         }
 
