@@ -22,6 +22,11 @@ public sealed class ExcelMatchService : IExcelMatchService
         CanonicalizeHeader("Dist. Tax."),
         CanonicalizeHeader("Inv Total:")
     };
+    private static readonly HashSet<string> DateColumnKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        CanonicalizeHeader("Document Date:"),
+        CanonicalizeHeader("Posting Date:")
+    };
 
     private static readonly string[] SourceOutputHeaders =
     {
@@ -377,7 +382,7 @@ public sealed class ExcelMatchService : IExcelMatchService
 
             for (var c = 0; c < result.TargetHeaders.Count; c += 1)
             {
-                SetCellValue(matchedSheet.Cell(rowIndex, c + 1), row.TargetValues[c]);
+                SetCellValue(matchedSheet.Cell(rowIndex, c + 1), row.TargetValues[c], result.TargetHeaders[c]);
             }
 
             var sourceStart = result.TargetHeaders.Count + 1;
@@ -392,8 +397,8 @@ public sealed class ExcelMatchService : IExcelMatchService
                 SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 6), row.Source.DocumentNumberRaw);
                 SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 7), row.Source.DocumentType);
                 SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 8), row.Source.PONumber);
-                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 9), row.Source.DocumentDate);
-                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 10), row.Source.PostingDate);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 9), row.Source.DocumentDate, "Document Date:");
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 10), row.Source.PostingDate, "Posting Date:");
                 SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 11), row.Source.YearPeriod);
                 SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 12), row.Source.OrderNumber);
                 SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 13), row.Source.AccountSet);
@@ -422,12 +427,14 @@ public sealed class ExcelMatchService : IExcelMatchService
             var rowIndex = r + 2;
             for (var c = 0; c < result.TargetHeaders.Count; c += 1)
             {
-                SetCellValue(unmatchedSheet.Cell(rowIndex, c + 1), values[c]);
+                SetCellValue(unmatchedSheet.Cell(rowIndex, c + 1), values[c], result.TargetHeaders[c]);
             }
         }
 
         ApplyCurrencyFormat(matchedSheet, fullHeaders, matchedRows.Count + 1);
         ApplyCurrencyFormat(unmatchedSheet, result.TargetHeaders, result.UnmatchedTargetValues.Count + 1);
+        ApplyDateFormat(matchedSheet, fullHeaders, matchedRows.Count + 1);
+        ApplyDateFormat(unmatchedSheet, result.TargetHeaders, result.UnmatchedTargetValues.Count + 1);
 
         matchedSheet.Columns().AdjustToContents();
         unmatchedSheet.Columns().AdjustToContents();
@@ -591,7 +598,7 @@ public sealed class ExcelMatchService : IExcelMatchService
         return $"\"{value.Replace("\"", "\"\"")}\"";
     }
 
-    private static void SetCellValue(IXLCell cell, string value)
+    private static void SetCellValue(IXLCell cell, string value, string? header = null)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -600,6 +607,13 @@ public sealed class ExcelMatchService : IExcelMatchService
         }
 
         var trimmed = value.Trim();
+        var headerKey = CanonicalizeHeader(header);
+        if (DateColumnKeys.Contains(headerKey) && TryParseExcelDate(trimmed, out var parsedDate))
+        {
+            cell.Value = parsedDate;
+            return;
+        }
+
         if (trimmed.Length > 1 && trimmed[0] == '0' && char.IsDigit(trimmed[1]))
         {
             cell.Value = trimmed;
@@ -638,6 +652,51 @@ public sealed class ExcelMatchService : IExcelMatchService
 
             sheet.Range(2, i + 1, lastRow, i + 1).Style.NumberFormat.Format = "#,##0.00";
         }
+    }
+
+    private static void ApplyDateFormat(IXLWorksheet sheet, IReadOnlyList<string> headers, int lastRow)
+    {
+        if (lastRow < 2)
+        {
+            return;
+        }
+
+        for (var i = 0; i < headers.Count; i += 1)
+        {
+            var key = CanonicalizeHeader(headers[i]);
+            if (!DateColumnKeys.Contains(key))
+            {
+                continue;
+            }
+
+            sheet.Range(2, i + 1, lastRow, i + 1).Style.NumberFormat.Format = "yyyy-mm-dd";
+        }
+    }
+
+    private static bool TryParseExcelDate(string value, out DateTime date)
+    {
+        if (DateTime.TryParse(value, CultureInfo.CurrentCulture, DateTimeStyles.None, out date))
+        {
+            return true;
+        }
+
+        if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out date))
+        {
+            return true;
+        }
+
+        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var oaDate) ||
+            double.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out oaDate))
+        {
+            if (oaDate > 0 && oaDate < 2958465)
+            {
+                date = DateTime.FromOADate(oaDate);
+                return true;
+            }
+        }
+
+        date = default;
+        return false;
     }
 
     private sealed record TargetData(
