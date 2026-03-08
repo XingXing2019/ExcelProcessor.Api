@@ -1,12 +1,28 @@
 using ClosedXML.Excel;
 using ExcelDataReader;
 using ExcelProcessor.Api.Models;
+using System.Globalization;
 using System.Text;
 
 namespace ExcelProcessor.Api.Services;
 
 public sealed class ExcelMatchService : IExcelMatchService
 {
+    private static readonly HashSet<string> CurrencyColumnKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        CanonicalizeHeader("Total Invoice Amount Vendor Currency"),
+        CanonicalizeHeader("VA Net Amount  (excl GST) Vendor Currency"),
+        CanonicalizeHeader("VA GST Amount Vendor Currency"),
+        CanonicalizeHeader("VA Total Amount Vendor Currency"),
+        CanonicalizeHeader("VA Net Amount  (excl GST) Functional Currency"),
+        CanonicalizeHeader("VA GST Amount Functional Currency"),
+        CanonicalizeHeader("PC Total Amount Vendor Currency"),
+        CanonicalizeHeader("PC Total Amount Functional Currency"),
+        CanonicalizeHeader("Net Dist. Amt."),
+        CanonicalizeHeader("Dist. Tax."),
+        CanonicalizeHeader("Inv Total:")
+    };
+
     private static readonly string[] SourceOutputHeaders =
     {
         "SourceRowNumber",
@@ -346,7 +362,14 @@ public sealed class ExcelMatchService : IExcelMatchService
             matchedSheet.Cell(1, i + 1).Style.Font.Bold = true;
         }
 
-        var matchedRows = result.CsvRows.Where(r => r.Source is not null).ToList();
+        var matchedTargetRowNumbers = result.CsvRows
+            .Where(r => r.Source is not null)
+            .Select(r => r.TargetRowNumber)
+            .ToHashSet();
+
+        var matchedRows = result.CsvRows
+            .Where(r => matchedTargetRowNumbers.Contains(r.TargetRowNumber))
+            .ToList();
         for (var r = 0; r < matchedRows.Count; r += 1)
         {
             var row = matchedRows[r];
@@ -354,34 +377,37 @@ public sealed class ExcelMatchService : IExcelMatchService
 
             for (var c = 0; c < result.TargetHeaders.Count; c += 1)
             {
-                matchedSheet.Cell(rowIndex, c + 1).Value = row.TargetValues[c];
+                SetCellValue(matchedSheet.Cell(rowIndex, c + 1), row.TargetValues[c]);
             }
 
             var sourceStart = result.TargetHeaders.Count + 1;
-            matchedSheet.Cell(rowIndex, sourceStart).Value = row.Source!.RowNumber;
-            matchedSheet.Cell(rowIndex, sourceStart + 1).Value = row.Source.BatchNo;
-            matchedSheet.Cell(rowIndex, sourceStart + 2).Value = row.Source.Description;
-            matchedSheet.Cell(rowIndex, sourceStart + 3).Value = row.Source.EntryNo;
-            matchedSheet.Cell(rowIndex, sourceStart + 4).Value = row.Source.InvoiceDescription;
-            matchedSheet.Cell(rowIndex, sourceStart + 5).Value = row.Source.VendorRaw;
-            matchedSheet.Cell(rowIndex, sourceStart + 6).Value = row.Source.DocumentNumberRaw;
-            matchedSheet.Cell(rowIndex, sourceStart + 7).Value = row.Source.DocumentType;
-            matchedSheet.Cell(rowIndex, sourceStart + 8).Value = row.Source.PONumber;
-            matchedSheet.Cell(rowIndex, sourceStart + 9).Value = row.Source.DocumentDate;
-            matchedSheet.Cell(rowIndex, sourceStart + 10).Value = row.Source.PostingDate;
-            matchedSheet.Cell(rowIndex, sourceStart + 11).Value = row.Source.YearPeriod;
-            matchedSheet.Cell(rowIndex, sourceStart + 12).Value = row.Source.OrderNumber;
-            matchedSheet.Cell(rowIndex, sourceStart + 13).Value = row.Source.AccountSet;
-            matchedSheet.Cell(rowIndex, sourceStart + 14).Value = row.Source.TaxGroup;
-            matchedSheet.Cell(rowIndex, sourceStart + 15).Value = row.Source.ExchangeRate;
-            matchedSheet.Cell(rowIndex, sourceStart + 16).Value = row.Source.Terms;
-            matchedSheet.Cell(rowIndex, sourceStart + 17).Value = row.Source.DueDate;
-            matchedSheet.Cell(rowIndex, sourceStart + 18).Value = row.Source.GLAccount;
-            matchedSheet.Cell(rowIndex, sourceStart + 19).Value = row.Source.AccountDescription;
-            matchedSheet.Cell(rowIndex, sourceStart + 20).Value = row.Source.DetailDescTaxAuth;
-            matchedSheet.Cell(rowIndex, sourceStart + 21).Value = row.Source.NetDistAmt;
-            matchedSheet.Cell(rowIndex, sourceStart + 22).Value = row.Source.DistTax;
-            matchedSheet.Cell(rowIndex, sourceStart + 23).Value = row.Source.InvTotal;
+            if (row.Source is not null)
+            {
+                matchedSheet.Cell(rowIndex, sourceStart).Value = row.Source.RowNumber;
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 1), row.Source.BatchNo);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 2), row.Source.Description);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 3), row.Source.EntryNo);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 4), row.Source.InvoiceDescription);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 5), row.Source.VendorRaw);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 6), row.Source.DocumentNumberRaw);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 7), row.Source.DocumentType);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 8), row.Source.PONumber);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 9), row.Source.DocumentDate);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 10), row.Source.PostingDate);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 11), row.Source.YearPeriod);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 12), row.Source.OrderNumber);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 13), row.Source.AccountSet);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 14), row.Source.TaxGroup);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 15), row.Source.ExchangeRate);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 16), row.Source.Terms);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 17), row.Source.DueDate);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 18), row.Source.GLAccount);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 19), row.Source.AccountDescription);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 20), row.Source.DetailDescTaxAuth);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 21), row.Source.NetDistAmt);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 22), row.Source.DistTax);
+                SetCellValue(matchedSheet.Cell(rowIndex, sourceStart + 23), row.Source.InvTotal);
+            }
         }
 
         for (var i = 0; i < result.TargetHeaders.Count; i += 1)
@@ -396,9 +422,12 @@ public sealed class ExcelMatchService : IExcelMatchService
             var rowIndex = r + 2;
             for (var c = 0; c < result.TargetHeaders.Count; c += 1)
             {
-                unmatchedSheet.Cell(rowIndex, c + 1).Value = values[c];
+                SetCellValue(unmatchedSheet.Cell(rowIndex, c + 1), values[c]);
             }
         }
+
+        ApplyCurrencyFormat(matchedSheet, fullHeaders, matchedRows.Count + 1);
+        ApplyCurrencyFormat(unmatchedSheet, result.TargetHeaders, result.UnmatchedTargetValues.Count + 1);
 
         matchedSheet.Columns().AdjustToContents();
         unmatchedSheet.Columns().AdjustToContents();
@@ -560,6 +589,55 @@ public sealed class ExcelMatchService : IExcelMatchService
         }
 
         return $"\"{value.Replace("\"", "\"\"")}\"";
+    }
+
+    private static void SetCellValue(IXLCell cell, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            cell.Value = string.Empty;
+            return;
+        }
+
+        var trimmed = value.Trim();
+        if (trimmed.Length > 1 && trimmed[0] == '0' && char.IsDigit(trimmed[1]))
+        {
+            cell.Value = trimmed;
+            return;
+        }
+
+        if (decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.InvariantCulture, out var invariantNumber))
+        {
+            cell.Value = invariantNumber;
+            return;
+        }
+
+        if (decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.CurrentCulture, out var currentCultureNumber))
+        {
+            cell.Value = currentCultureNumber;
+            return;
+        }
+
+        cell.Value = trimmed;
+    }
+
+    private static void ApplyCurrencyFormat(IXLWorksheet sheet, IReadOnlyList<string> headers, int lastRow)
+    {
+        if (lastRow < 2)
+        {
+            return;
+        }
+
+        for (var i = 0; i < headers.Count; i += 1)
+        {
+            var key = CanonicalizeHeader(headers[i]);
+            if (!CurrencyColumnKeys.Contains(key))
+            {
+                continue;
+            }
+
+            sheet.Range(2, i + 1, lastRow, i + 1).Style.NumberFormat.Format = "#,##0.00";
+        }
     }
 
     private sealed record TargetData(
