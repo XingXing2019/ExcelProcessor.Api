@@ -56,4 +56,25 @@ public sealed class MatchController : ControllerBase
             return BadRequest(new ErrorResponse(ex.Message));
         }
     }
+
+    [HttpPost("target-columns")]
+    [ProducesResponseType(typeof(TargetColumnsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public IActionResult TargetColumns([FromForm] IFormFile? targetFile)
+    {
+        if (targetFile is null)
+        {
+            return BadRequest(new ErrorResponse("targetFile is required."));
+        }
+
+        try
+        {
+            var columns = _excelMatchService.GetNonEmptyTargetColumns(targetFile);
+            return Ok(new TargetColumnsResponse(columns));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new ErrorResponse(ex.Message));
+        }
+    }
 }

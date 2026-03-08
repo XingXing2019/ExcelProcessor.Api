@@ -7,4 +7,6 @@ public interface IExcelMatchService
     MatchResponse Match(IFormFile sourceFile, IFormFile targetFile);
 
     MatchCsvReport BuildCsvReport(IFormFile sourceFile, IFormFile targetFile);
+
+    IReadOnlyList<string> GetNonEmptyTargetColumns(IFormFile targetFile);
 }
