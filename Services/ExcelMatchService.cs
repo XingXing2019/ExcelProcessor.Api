@@ -1,3 +1,4 @@
+using ClosedXML.Excel;
 using ExcelDataReader;
 using ExcelProcessor.Api.Models;
 using System.Text;
@@ -46,6 +47,14 @@ public sealed class ExcelMatchService : IExcelMatchService
         var csv = BuildCsv(result.CsvRows, result.TargetHeaders);
         var fileName = $"match-report-{DateTime.UtcNow:yyyyMMdd-HHmmss}.csv";
         return new MatchCsvReport(Encoding.UTF8.GetBytes(csv), fileName);
+    }
+
+    public MatchExcelReport BuildExcelReport(IFormFile sourceFile, IFormFile targetFile)
+    {
+        var result = Compute(sourceFile, targetFile);
+        var content = BuildExcel(result);
+        var fileName = $"match-report-{DateTime.UtcNow:yyyyMMdd-HHmmss}.xlsx";
+        return new MatchExcelReport(content, fileName);
     }
 
     public IReadOnlyList<string> GetNonEmptyTargetColumns(IFormFile targetFile)
@@ -132,7 +141,12 @@ public sealed class ExcelMatchService : IExcelMatchService
             elapsedMs
         );
 
-        return new MatchComputationResult(summary, csvRows, targetData.TargetHeaders);
+        var unmatchedTargetValues = csvRows
+            .Where(r => r.Source is null && !csvRows.Any(m => m.TargetRowNumber == r.TargetRowNumber && m.Source is not null))
+            .Select(r => r.TargetValues)
+            .ToList();
+
+        return new MatchComputationResult(summary, csvRows, targetData.TargetHeaders, unmatchedTargetValues);
     }
 
     private static TargetData ReadTargetData(IFormFile targetFile)
@@ -316,6 +330,82 @@ public sealed class ExcelMatchService : IExcelMatchService
         }
 
         return sb.ToString();
+    }
+
+    private static byte[] BuildExcel(MatchComputationResult result)
+    {
+        using var workbook = new XLWorkbook();
+        var matchedSheet = workbook.Worksheets.Add("Matched Results");
+        var unmatchedSheet = workbook.Worksheets.Add("Unmatched Targets");
+
+        var fullHeaders = result.TargetHeaders.Concat(SourceOutputHeaders).ToList();
+
+        for (var i = 0; i < fullHeaders.Count; i += 1)
+        {
+            matchedSheet.Cell(1, i + 1).Value = fullHeaders[i];
+            matchedSheet.Cell(1, i + 1).Style.Font.Bold = true;
+        }
+
+        var matchedRows = result.CsvRows.Where(r => r.Source is not null).ToList();
+        for (var r = 0; r < matchedRows.Count; r += 1)
+        {
+            var row = matchedRows[r];
+            var rowIndex = r + 2;
+
+            for (var c = 0; c < result.TargetHeaders.Count; c += 1)
+            {
+                matchedSheet.Cell(rowIndex, c + 1).Value = row.TargetValues[c];
+            }
+
+            var sourceStart = result.TargetHeaders.Count + 1;
+            matchedSheet.Cell(rowIndex, sourceStart).Value = row.Source!.RowNumber;
+            matchedSheet.Cell(rowIndex, sourceStart + 1).Value = row.Source.BatchNo;
+            matchedSheet.Cell(rowIndex, sourceStart + 2).Value = row.Source.Description;
+            matchedSheet.Cell(rowIndex, sourceStart + 3).Value = row.Source.EntryNo;
+            matchedSheet.Cell(rowIndex, sourceStart + 4).Value = row.Source.InvoiceDescription;
+            matchedSheet.Cell(rowIndex, sourceStart + 5).Value = row.Source.VendorRaw;
+            matchedSheet.Cell(rowIndex, sourceStart + 6).Value = row.Source.DocumentNumberRaw;
+            matchedSheet.Cell(rowIndex, sourceStart + 7).Value = row.Source.DocumentType;
+            matchedSheet.Cell(rowIndex, sourceStart + 8).Value = row.Source.PONumber;
+            matchedSheet.Cell(rowIndex, sourceStart + 9).Value = row.Source.DocumentDate;
+            matchedSheet.Cell(rowIndex, sourceStart + 10).Value = row.Source.PostingDate;
+            matchedSheet.Cell(rowIndex, sourceStart + 11).Value = row.Source.YearPeriod;
+            matchedSheet.Cell(rowIndex, sourceStart + 12).Value = row.Source.OrderNumber;
+            matchedSheet.Cell(rowIndex, sourceStart + 13).Value = row.Source.AccountSet;
+            matchedSheet.Cell(rowIndex, sourceStart + 14).Value = row.Source.TaxGroup;
+            matchedSheet.Cell(rowIndex, sourceStart + 15).Value = row.Source.ExchangeRate;
+            matchedSheet.Cell(rowIndex, sourceStart + 16).Value = row.Source.Terms;
+            matchedSheet.Cell(rowIndex, sourceStart + 17).Value = row.Source.DueDate;
+            matchedSheet.Cell(rowIndex, sourceStart + 18).Value = row.Source.GLAccount;
+            matchedSheet.Cell(rowIndex, sourceStart + 19).Value = row.Source.AccountDescription;
+            matchedSheet.Cell(rowIndex, sourceStart + 20).Value = row.Source.DetailDescTaxAuth;
+            matchedSheet.Cell(rowIndex, sourceStart + 21).Value = row.Source.NetDistAmt;
+            matchedSheet.Cell(rowIndex, sourceStart + 22).Value = row.Source.DistTax;
+            matchedSheet.Cell(rowIndex, sourceStart + 23).Value = row.Source.InvTotal;
+        }
+
+        for (var i = 0; i < result.TargetHeaders.Count; i += 1)
+        {
+            unmatchedSheet.Cell(1, i + 1).Value = result.TargetHeaders[i];
+            unmatchedSheet.Cell(1, i + 1).Style.Font.Bold = true;
+        }
+
+        for (var r = 0; r < result.UnmatchedTargetValues.Count; r += 1)
+        {
+            var values = result.UnmatchedTargetValues[r];
+            var rowIndex = r + 2;
+            for (var c = 0; c < result.TargetHeaders.Count; c += 1)
+            {
+                unmatchedSheet.Cell(rowIndex, c + 1).Value = values[c];
+            }
+        }
+
+        matchedSheet.Columns().AdjustToContents();
+        unmatchedSheet.Columns().AdjustToContents();
+
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
     }
 
     private static string[] ReadHeaderNames(IExcelDataReader reader)
@@ -530,6 +620,7 @@ public sealed class ExcelMatchService : IExcelMatchService
     private sealed record MatchComputationResult(
         MatchResponse Summary,
         List<CsvRow> CsvRows,
-        IReadOnlyList<string> TargetHeaders
+        IReadOnlyList<string> TargetHeaders,
+        List<string[]> UnmatchedTargetValues
     );
 }

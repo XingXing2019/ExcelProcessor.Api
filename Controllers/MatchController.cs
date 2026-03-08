@@ -57,6 +57,31 @@ public sealed class MatchController : ControllerBase
         }
     }
 
+    [HttpPost("excel")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public IActionResult MatchExcel([FromForm] MatchRequest request)
+    {
+        if (request.SourceFile is null || request.TargetFile is null)
+        {
+            return BadRequest(new ErrorResponse("Both sourceFile and targetFile are required."));
+        }
+
+        try
+        {
+            var report = _excelMatchService.BuildExcelReport(request.SourceFile, request.TargetFile);
+            return File(
+                report.Content,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                report.FileName
+            );
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new ErrorResponse(ex.Message));
+        }
+    }
+
     [HttpPost("target-columns")]
     [ProducesResponseType(typeof(TargetColumnsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
