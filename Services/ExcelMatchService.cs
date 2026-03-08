@@ -9,17 +9,29 @@ public sealed class ExcelMatchService : IExcelMatchService
     private static readonly string[] SourceOutputHeaders =
     {
         "SourceRowNumber",
-        "SourceVendor",
-        "SourceDocumentNumber",
+        "Batch No.:",
+        "Description:",
+        "Entry No.:",
+        "Invoice Description",
+        "Vendor:",
+        "Document Number:",
+        "Document Type:",
+        "PO Number:",
+        "Document Date:",
+        "Posting Date:",
+        "Year - Period:",
+        "Order Number:",
+        "Account Set:",
+        "Tax Group:",
+        "Exchange Rate:",
+        "Terms:",
+        "Due Date:",
         "G/L Account",
-        "Account Set",
-        "Tax Group",
-        "Document Date",
-        "PO Number",
+        "Account Description",
+        "Detail Desc/ Tax Auth",
         "Net Dist. Amt.",
         "Dist. Tax.",
-        "Inv Total",
-        "Exchange Rate"
+        "Inv Total:"
     };
 
     public MatchResponse Match(IFormFile sourceFile, IFormFile targetFile)
@@ -181,7 +193,19 @@ public sealed class ExcelMatchService : IExcelMatchService
         var sourceHeaders = ReadHeaderNames(reader);
         var sourceVendorIndex = FindRequiredColumnByHeaders(sourceHeaders, "Vendor:");
         var sourceDocumentIndex = FindRequiredColumnByHeaders(sourceHeaders, "Document Number:");
+        var sourceBatchNoIndex = FindOptionalColumnByHeaders(sourceHeaders, "Batch No.:");
+        var sourceDescriptionIndex = FindOptionalColumnByHeaders(sourceHeaders, "Description:");
+        var sourceEntryNoIndex = FindOptionalColumnByHeaders(sourceHeaders, "Entry No.:");
+        var sourceInvoiceDescriptionIndex = FindOptionalColumnByHeaders(sourceHeaders, "Invoice Description");
+        var sourceDocumentTypeIndex = FindOptionalColumnByHeaders(sourceHeaders, "Document Type:");
+        var sourcePostingDateIndex = FindOptionalColumnByHeaders(sourceHeaders, "Posting Date:");
+        var sourceYearPeriodIndex = FindOptionalColumnByHeaders(sourceHeaders, "Year - Period:");
+        var sourceOrderNumberIndex = FindOptionalColumnByHeaders(sourceHeaders, "Order Number:");
+        var sourceTermsIndex = FindOptionalColumnByHeaders(sourceHeaders, "Terms:");
+        var sourceDueDateIndex = FindOptionalColumnByHeaders(sourceHeaders, "Due Date:");
         var sourceGLAccountIndex = FindOptionalColumnByHeaders(sourceHeaders, "G/L Account");
+        var sourceAccountDescriptionIndex = FindOptionalColumnByHeaders(sourceHeaders, "Account Description");
+        var sourceDetailDescTaxAuthIndex = FindOptionalColumnByHeaders(sourceHeaders, "Detail Desc/ Tax Auth");
         var sourceAccountSetIndex = FindOptionalColumnByHeaders(sourceHeaders, "Account Set:");
         var sourceTaxGroupIndex = FindOptionalColumnByHeaders(sourceHeaders, "Tax Group:");
         var sourceDocumentDateIndex = FindOptionalColumnByHeaders(sourceHeaders, "Document Date:");
@@ -196,33 +220,48 @@ public sealed class ExcelMatchService : IExcelMatchService
         {
             sourceRows += 1;
             var rowNumber = sourceRows + 1;
-            var sourceVendor = ExtractVendorAccount(reader.GetValue(sourceVendorIndex)?.ToString() ?? string.Empty);
-            var sourceDocument = Normalize(reader.GetValue(sourceDocumentIndex));
+            var sourceVendorRaw = Normalize(reader.GetValue(sourceVendorIndex));
+            var sourceVendorAccount = ExtractVendorAccount(sourceVendorRaw);
+            var sourceDocumentRaw = Normalize(reader.GetValue(sourceDocumentIndex));
 
-            if (string.IsNullOrEmpty(sourceVendor))
+            if (string.IsNullOrEmpty(sourceVendorAccount))
             {
                 continue;
             }
 
             var sourceRecord = new SourceRecord(
                 rowNumber,
-                sourceVendor,
-                sourceDocument,
-                ReadOptionalValue(reader, sourceGLAccountIndex),
+                sourceVendorAccount,
+                sourceDocumentRaw,
+                ReadOptionalValue(reader, sourceBatchNoIndex),
+                ReadOptionalValue(reader, sourceDescriptionIndex),
+                ReadOptionalValue(reader, sourceEntryNoIndex),
+                ReadOptionalValue(reader, sourceInvoiceDescriptionIndex),
+                sourceVendorRaw,
+                sourceDocumentRaw,
+                ReadOptionalValue(reader, sourceDocumentTypeIndex),
+                ReadOptionalValue(reader, sourcePONumberIndex),
+                ReadOptionalValue(reader, sourceDocumentDateIndex),
+                ReadOptionalValue(reader, sourcePostingDateIndex),
+                ReadOptionalValue(reader, sourceYearPeriodIndex),
+                ReadOptionalValue(reader, sourceOrderNumberIndex),
                 ReadOptionalValue(reader, sourceAccountSetIndex),
                 ReadOptionalValue(reader, sourceTaxGroupIndex),
-                ReadOptionalValue(reader, sourceDocumentDateIndex),
-                ReadOptionalValue(reader, sourcePONumberIndex),
+                ReadOptionalValue(reader, sourceExchangeRateIndex),
+                ReadOptionalValue(reader, sourceTermsIndex),
+                ReadOptionalValue(reader, sourceDueDateIndex),
+                ReadOptionalValue(reader, sourceGLAccountIndex),
+                ReadOptionalValue(reader, sourceAccountDescriptionIndex),
+                ReadOptionalValue(reader, sourceDetailDescTaxAuthIndex),
                 ReadOptionalValue(reader, sourceNetDistAmtIndex),
                 ReadOptionalValue(reader, sourceDistTaxIndex),
-                ReadOptionalValue(reader, sourceInvTotalIndex),
-                ReadOptionalValue(reader, sourceExchangeRateIndex)
+                ReadOptionalValue(reader, sourceInvTotalIndex)
             );
 
-            if (!recordsByVendor.TryGetValue(sourceVendor, out var vendorRows))
+            if (!recordsByVendor.TryGetValue(sourceVendorAccount, out var vendorRows))
             {
                 vendorRows = new List<SourceRecord>();
-                recordsByVendor[sourceVendor] = vendorRows;
+                recordsByVendor[sourceVendorAccount] = vendorRows;
             }
             vendorRows.Add(sourceRecord);
         }
@@ -248,17 +287,29 @@ public sealed class ExcelMatchService : IExcelMatchService
             else
             {
                 fields.Add(row.Source.RowNumber.ToString());
-                fields.Add(EscapeCsv(row.Source.Vendor));
-                fields.Add(EscapeCsv(row.Source.DocumentNumber));
-                fields.Add(EscapeCsv(row.Source.GLAccount));
+                fields.Add(EscapeCsv(row.Source.BatchNo));
+                fields.Add(EscapeCsv(row.Source.Description));
+                fields.Add(EscapeCsv(row.Source.EntryNo));
+                fields.Add(EscapeCsv(row.Source.InvoiceDescription));
+                fields.Add(EscapeCsv(row.Source.VendorRaw));
+                fields.Add(EscapeCsv(row.Source.DocumentNumberRaw));
+                fields.Add(EscapeCsv(row.Source.DocumentType));
+                fields.Add(EscapeCsv(row.Source.PONumber));
+                fields.Add(EscapeCsv(row.Source.DocumentDate));
+                fields.Add(EscapeCsv(row.Source.PostingDate));
+                fields.Add(EscapeCsv(row.Source.YearPeriod));
+                fields.Add(EscapeCsv(row.Source.OrderNumber));
                 fields.Add(EscapeCsv(row.Source.AccountSet));
                 fields.Add(EscapeCsv(row.Source.TaxGroup));
-                fields.Add(EscapeCsv(row.Source.DocumentDate));
-                fields.Add(EscapeCsv(row.Source.PONumber));
+                fields.Add(EscapeCsv(row.Source.ExchangeRate));
+                fields.Add(EscapeCsv(row.Source.Terms));
+                fields.Add(EscapeCsv(row.Source.DueDate));
+                fields.Add(EscapeCsv(row.Source.GLAccount));
+                fields.Add(EscapeCsv(row.Source.AccountDescription));
+                fields.Add(EscapeCsv(row.Source.DetailDescTaxAuth));
                 fields.Add(EscapeCsv(row.Source.NetDistAmt));
                 fields.Add(EscapeCsv(row.Source.DistTax));
                 fields.Add(EscapeCsv(row.Source.InvTotal));
-                fields.Add(EscapeCsv(row.Source.ExchangeRate));
             }
 
             sb.AppendLine(string.Join(",", fields));
@@ -436,17 +487,31 @@ public sealed class ExcelMatchService : IExcelMatchService
 
     private sealed record SourceRecord(
         int RowNumber,
-        string Vendor,
+        string VendorAccount,
         string DocumentNumber,
-        string GLAccount,
+        string BatchNo,
+        string Description,
+        string EntryNo,
+        string InvoiceDescription,
+        string VendorRaw,
+        string DocumentNumberRaw,
+        string DocumentType,
+        string PONumber,
+        string DocumentDate,
+        string PostingDate,
+        string YearPeriod,
+        string OrderNumber,
         string AccountSet,
         string TaxGroup,
-        string DocumentDate,
-        string PONumber,
+        string ExchangeRate,
+        string Terms,
+        string DueDate,
+        string GLAccount,
+        string AccountDescription,
+        string DetailDescTaxAuth,
         string NetDistAmt,
         string DistTax,
-        string InvTotal,
-        string ExchangeRate
+        string InvTotal
     );
 
     private sealed record TargetRecord(
